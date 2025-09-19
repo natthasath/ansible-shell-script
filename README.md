@@ -69,9 +69,3 @@ ansible servers -m ping -o
 ansible-vault encrypt group_vars/servers.yml
 ansible servers -m ping -o --ask-vault-pass
 ```
-
-### Note
-
-```text
-เพราะมันเป็น “ชื่อมาตรฐาน + บอกชนิดคีย์” ของ OpenSSH ครับ
-```
