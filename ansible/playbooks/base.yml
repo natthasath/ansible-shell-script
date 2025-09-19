@@ -1,0 +1,45 @@
+- name: Base tools for system observability
+  hosts: servers
+  gather_facts: true
+  become: true
+
+  vars:
+    base_packages:
+      # htop — a friendlier, colorful process viewer.
+      - htop
+      # atop — longer-term resource accounting.
+      - atop
+      # iotop — I/O usage by process.
+      - iotop
+      # iftop — bandwidth usage by host.
+      - iftop
+      # powertop — power usage diagnostics (great on laptops).
+      - powertop
+      # btop — modern TUI resource monitor.
+      - btop
+
+  tasks:
+    - name: Apt | Update cache (once, with cache_valid_time)
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [packages, base, observability]
+
+    - name: Apt | Ensure base observability packages are present
+      ansible.builtin.apt:
+        name: "{{ base_packages }}"
+        state: present
+      tags: [packages, base, observability]
+
+    - name: Info | Show installed package versions (optional)
+      ansible.builtin.command: >
+        bash -lc "dpkg -l htop atop iotop iftop powertop btop | awk '/^ii/ {printf \"%-12s %s\\n\", $2, $3}'"
+      changed_when: false
+      register: pkg_list
+      tags: [packages, base, observability]
+
+    - name: Debug | Print package versions
+      ansible.builtin.debug:
+        msg: "{{ pkg_list.stdout_lines }}"
+      changed_when: false
+      tags: [packages, base, observability]
