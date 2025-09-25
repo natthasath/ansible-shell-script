@@ -1,0 +1,93 @@
+# playbooks/git_pull.yml
+---
+- name: Pull a Git repo into the remote ansible_user's HOME
+  hosts: servers
+  gather_facts: true
+  become: true
+
+  vars:
+    # REQUIRED: pass via -e repo_url=...
+    repo_url: ""
+    # OPTIONAL: can be overridden via -e
+    repo_name: ""               # if empty -> derived from repo_url
+    repo_dest: ""               # if empty -> "~{{ ansible_user }}/{{ repo_name }}"
+
+  pre_tasks:
+    - name: Guard | Debian/Ubuntu family (uses apt)
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == "Debian"
+        fail_msg: "This playbook targets Debian/Ubuntu family."
+
+    - name: Guard | repo_url must be provided (use -e repo_url=...)
+      ansible.builtin.assert:
+        that:
+          - repo_url is string
+          - repo_url | length > 0
+        fail_msg: "Provide repo_url, e.g. -e repo_url=https://github.com/owner/repo.git"
+
+    - name: Ensure git and CA certs are installed
+      ansible.builtin.apt:
+        name:
+          - git
+          - ca-certificates
+        state: present
+        update_cache: yes
+
+    - name: Derive repo_name from repo_url when not provided
+      ansible.builtin.set_fact:
+        repo_name: >-
+          {{
+            (repo_name | length > 0)
+              | ternary(repo_name,
+                        (repo_url | regex_replace('.*/','') | regex_replace('\\.git$','')))
+          }}
+
+    - name: Compute repo_dest (default to ansible_user's HOME via tilde expansion)
+      ansible.builtin.set_fact:
+        repo_dest: "{{ (repo_dest | length > 0) | ternary(repo_dest, ('~' ~ ansible_user ~ '/' ~ repo_name)) }}"
+
+    # Optional: pre-seed known_hosts if using SSH URL
+    - name: Ensure ~/.ssh exists for ansible_user (SSH URLs only)
+      ansible.builtin.file:
+        path: "~{{ ansible_user }}/.ssh"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0700"
+      become_user: "{{ ansible_user }}"
+      when: repo_url is search('(^git@|^ssh://)')
+
+    - name: Add GitHub host key to known_hosts (SSH URLs only)
+      ansible.builtin.known_hosts:
+        path: "~{{ ansible_user }}/.ssh/known_hosts"
+        name: github.com
+        key: "github.com {{ lookup('pipe', 'ssh-keyscan -t rsa,ecdsa,ed25519 github.com 2>/dev/null') }}"
+        state: present
+        hash_host: true
+      become_user: "{{ ansible_user }}"
+      when: repo_url is search('(^git@|^ssh://)')
+
+  tasks:
+    # We rely on ~user expansion + become_user to avoid mis-detecting HOME.
+    - name: Clone or update repo into {{ repo_dest }}
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ repo_dest }}"
+        version: HEAD            # track the default branch
+        update: yes              # pull if already present
+        force: no                # do not clobber local changes
+        accept_hostkey: yes
+        clone: yes
+        depth: 0                 # full history; set to 1 for shallow clone
+        recursive: yes           # also clone submodules
+        track_submodules: yes    # update submodules on pull
+      become_user: "{{ ansible_user }}"
+
+    - name: Safety net | Ensure ownership is correct (recursive)
+      ansible.builtin.file:
+        path: "{{ repo_dest }}"
+        state: directory
+        recurse: yes
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"

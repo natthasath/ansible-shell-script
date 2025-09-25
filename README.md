@@ -99,8 +99,8 @@ ansible-playbook playbooks/user_create.yml -l dev \
 ```shell
 ansible-playbook playbooks/user_password.yml -l dev \
   -e target_user=username \
-  -e new_password_plain='P@55w0rd'
-  -e force_expire=true
+  -e new_password_plain='P@55w0rd' \
+  -e force_expire=true \
   -e unlock_account=true
 ```
 
@@ -108,4 +108,12 @@ ansible-playbook playbooks/user_password.yml -l dev \
 
 ```shell
 ansible-playbook playbooks/user_delete.yml -l dev -e delete_user_name=username
+```
+
+### 🏆 Git Pull
+
+```shell
+ansible-playbook playbooks/git_pull.yml -l dev \
+  -e repo_url=https://github.com/natthasath/ispconfig-shell-script.git \
+  -e repo_dest=/home/username/ispconfig-shell-script
 ```
