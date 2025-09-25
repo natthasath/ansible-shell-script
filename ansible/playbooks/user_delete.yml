@@ -1,0 +1,72 @@
+# playbooks/user_delete.yml
+---
+- name: Delete a local user (and clean up) on Ubuntu/Debian
+  hosts: servers
+  gather_facts: true
+  become: true
+
+  vars:
+    delete_user_name: "tempuser"   # <-- set the username to delete
+
+    # Optional: protect critical accounts from accidental deletion
+    protected_users:
+      - root
+
+  pre_tasks:
+    - name: Guard | Ensure Debian/Ubuntu family
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == "Debian"
+        fail_msg: "This playbook targets Debian/Ubuntu family."
+
+    - name: Guard | Ensure delete_user_name is set and not protected
+      ansible.builtin.assert:
+        that:
+          - delete_user_name is string
+          - delete_user_name | length > 0
+          - delete_user_name not in protected_users
+        fail_msg: "Refusing to delete an empty or protected username."
+
+    - name: Detect if user exists
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ delete_user_name }}"
+      register: user_entry
+      failed_when: false
+
+  tasks:
+    - name: Stop/Kill any processes owned by the user (if exists)
+      ansible.builtin.command: "pkill -KILL -u {{ delete_user_name }}"
+      register: pkill_result
+      changed_when: pkill_result.rc == 0
+      failed_when: false
+      when: user_entry is defined and user_entry is not failed and (user_entry.ansible_facts.getent_passwd | length) > 0
+
+    - name: Remove user's crontab (if any)
+      ansible.builtin.command: "crontab -r -u {{ delete_user_name }}"
+      register: crontab_rm
+      changed_when: crontab_rm.rc == 0
+      failed_when: false
+      when: user_entry is defined and user_entry is not failed and (user_entry.ansible_facts.getent_passwd | length) > 0
+
+    - name: Remove sudoers.d entry (NOPASSWD or custom) if present
+      ansible.builtin.file:
+        path: "/etc/sudoers.d/90-{{ delete_user_name }}"
+        state: absent
+      when: user_entry is defined and user_entry is not failed and (user_entry.ansible_facts.getent_passwd | length) > 0
+
+    - name: Delete the user account (remove home & mail spool)
+      ansible.builtin.user:
+        name: "{{ delete_user_name }}"
+        state: absent
+        remove: true
+      when: user_entry is defined and user_entry is not failed and (user_entry.ansible_facts.getent_passwd | length) > 0
+
+    - name: Extra cleanup (in case of leftovers)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/home/{{ delete_user_name }}"
+        - "/var/mail/{{ delete_user_name }}"
+      when: user_entry is defined and user_entry is not failed and (user_entry.ansible_facts.getent_passwd | length) > 0

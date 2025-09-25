@@ -86,3 +86,9 @@ ansible-playbook playbooks/user_create.yml -l dev \
   -e create_user_name=username \
   -e create_user_password_plain='changeme'
 ```
+
+### 🏆 Delete User
+
+```shell
+ansible-playbook playbooks/user_delete.yml -l dev -e delete_user_name=username
+```
