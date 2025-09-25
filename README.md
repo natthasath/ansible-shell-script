@@ -69,3 +69,10 @@ ansible servers -m ping -o
 ansible-vault encrypt group_vars/servers.yml
 ansible servers -m ping -o --ask-vault-pass
 ```
+
+### 🏆 Install Playbook
+
+```shell
+ansible-playbook playbooks/base.yml --tags packages --check
+ansible-playbook playbooks/base.yml --tags packages
+```
