@@ -74,5 +74,6 @@ ansible servers -m ping -o --ask-vault-pass
 
 ```shell
 ansible-playbook playbooks/base.yml --tags packages --check
-ansible-playbook playbooks/base.yml --tags packages
+ansible-playbook playbooks/base.yml --tags packages -l prod
+ansible-playbook playbooks/base.yml --tags packages -l dev
 ```
