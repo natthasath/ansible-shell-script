@@ -20,6 +20,7 @@ pipx ensurepath
 export PATH="$PATH:$HOME/.local/bin"
 pipx --version
 pipx install --include-deps ansible
+pipx inject ansible passlib
 ansible --version
 ```
 
@@ -70,10 +71,18 @@ ansible-vault encrypt group_vars/servers.yml
 ansible servers -m ping -o --ask-vault-pass
 ```
 
-### 🏆 Install Playbook
+### 🏆 Install Package
 
 ```shell
 ansible-playbook playbooks/base.yml --tags packages --check
 ansible-playbook playbooks/base.yml --tags packages -l prod
 ansible-playbook playbooks/base.yml --tags packages -l dev
+```
+
+### 🏆 Create User
+
+```shell
+ansible-playbook playbooks/user_create.yml -l dev \
+  -e create_user_name=username \
+  -e create_user_password_plain='changeme'
 ```

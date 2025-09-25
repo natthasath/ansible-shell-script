@@ -6,23 +6,23 @@
   become: true
 
   vars:
-    # === ปรับค่าตามต้องการ ===
-    create_user_name: "devops"
-    create_user_uid: null            # ใส่เลข UID ถ้าต้องการ fix (เช่น 1010) ไม่งั้นปล่อย null
-    create_user_shell: "/bin/bash"
-    create_user_ssh_pubkey: "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}"
-    create_user_password_plain: ""   # ถ้าอยากตั้งรหัส UNIX (สำหรับ login) ใส่ plaintext มานี่ (หรือปล่อยว่างเพื่อไม่ตั้ง)
-    sudo_nopasswd: false             # true = sudo โดยไม่ถามรหัส (ปลอดภัยน้อยลง แต่สะดวก CI)
+    # === Adjust as needed ===
+    create_user_name: "devops"             # Username to create
+    create_user_uid: null                   # Set a fixed UID (e.g., 1010) or keep null to auto-assign
+    create_user_shell: "/bin/bash"          # Default shell
+    create_user_ssh_pubkey: "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}"  # Public key to authorize
+    create_user_password_plain: ""          # Plaintext UNIX password (leave empty to skip password)
+    sudo_nopasswd: false                    # true = passwordless sudo (convenient, but be cautious)
 
   pre_tasks:
     - name: Guard | Ensure Debian/Ubuntu family
       ansible.builtin.assert:
         that:
           - ansible_facts.os_family == "Debian"
-        fail_msg: "This playbook targets Debian/Ubuntu family (Ubuntu 22.04 OK)."
+        fail_msg: "This playbook targets Debian/Ubuntu family."
         success_msg: "Debian/Ubuntu confirmed."
 
-    - name: Ensure sudo package present
+    - name: Ensure sudo package is present
       ansible.builtin.apt:
         name: sudo
         state: present
@@ -34,7 +34,7 @@
         name: "{{ create_user_name }}"
         uid: "{{ create_user_uid if create_user_uid is not none else omit }}"
         shell: "{{ create_user_shell }}"
-        groups: "sudo"
+        groups: "sudo"            # Add user to sudo group (Ubuntu/Debian)
         append: true
         create_home: true
         state: present
@@ -59,7 +59,7 @@
         manage_dir: false
       when: create_user_ssh_pubkey | length > 0
 
-    - name: (Option) Set NOPASSWD sudo for the user via sudoers.d
+    - name: (Optional) Configure passwordless sudo via sudoers.d
       ansible.builtin.copy:
         dest: "/etc/sudoers.d/90-{{ create_user_name }}"
         owner: root
