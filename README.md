@@ -117,3 +117,9 @@ ansible-playbook playbooks/git_pull.yml -l dev \
   -e repo_url=https://github.com/natthasath/ispconfig-shell-script.git \
   -e repo_dest=/home/username/ispconfig-shell-script
 ```
+
+### 🏆 Disk Report
+
+```shell
+ansible-playbook playbooks/disk_report.yml -l dev
+```

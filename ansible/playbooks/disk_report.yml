@@ -1,0 +1,86 @@
+# playbooks/disk_report.yml
+---
+- name: Disk usage summary (no files saved)
+  hosts: servers
+  gather_facts: true
+  become: true
+
+  vars:
+    # Include only real filesystems; tweak as needed
+    fs_include: ["ext2", "ext3", "ext4", "xfs", "btrfs", "zfs"]
+    # Exclude noisy mounts
+    mount_exclude_regex: "^(/boot/efi|/snap|/run|/var/lib/docker|/var/lib/containers)"
+
+  tasks:
+    # 1) Filter mounts we care about
+    - name: Build filtered mount list
+      ansible.builtin.set_fact:
+        mounts_filtered: >-
+          {{
+            ansible_mounts
+            | selectattr('fstype', 'in', fs_include)
+            | rejectattr('mount', 'match', mount_exclude_regex)
+            | list
+          }}
+
+    # 2) Enrich each mount with used bytes and % (cast to int!)
+    - name: Init summary list
+      ansible.builtin.set_fact:
+        mounts_summary: []
+
+    - name: Append per-mount metrics (ints + computed fields)
+      ansible.builtin.set_fact:
+        mounts_summary: >-
+          {{
+            mounts_summary
+            + [ {
+                  'mount': item.mount,
+                  'fstype': item.fstype,
+                  'size_total': (item.size_total | int),
+                  'size_available': (item.size_available | int),
+                  'size_used': ((item.size_total | int) - (item.size_available | int)),
+                  'pct_used': (
+                    ((item.size_total | int) > 0)
+                    | ternary(
+                        (100.0 * ((item.size_total | int) - (item.size_available | int)) / (item.size_total | int)) | round(1),
+                        0.0
+                      )
+                  )
+                } ]
+          }}
+      loop: "{{ mounts_filtered }}"
+      loop_control:
+        label: "{{ item.mount }}"
+
+    # 3) Totals across all selected mounts — split into separate steps
+    - name: Compute totals (bytes) from mounts_summary
+      ansible.builtin.set_fact:
+        total_bytes: "{{ (mounts_summary | map(attribute='size_total') | sum) | int }}"
+        free_bytes:  "{{ (mounts_summary | map(attribute='size_available') | sum) | int }}"
+
+    - name: Compute used bytes (separate task so var exists before reuse)
+      ansible.builtin.set_fact:
+        used_bytes: "{{ (total_bytes | int) - (free_bytes | int) }}"
+
+    - name: Compute percent and human-readable totals
+      ansible.builtin.set_fact:
+        pct_used_total: >-
+          {{
+            (total_bytes | int) > 0
+            | ternary( (100.0 * (used_bytes | int) / (total_bytes | int)) | round(1), 0.0 )
+          }}
+        total_h: "{{ (total_bytes | int) | human_readable }}"
+        used_h:  "{{ (used_bytes  | int) | human_readable }}"
+        free_h:  "{{ (free_bytes  | int) | human_readable }}"
+
+    # 4) Print clean summary
+    - name: === DISK SUMMARY ===
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Total: {{ total_h }}, Used: {{ used_h }}, Free: {{ free_h }}, %Used: {{ pct_used_total }}%"
+          - "---- Per mount ----"
+          - >-
+            {% for m in (mounts_summary | sort(attribute='mount')) -%}
+            {{ m.mount }} | {{ m.fstype }} | {{ (m.size_total | human_readable) }} total | {{ (m.size_used | human_readable) }} used | {{ (m.size_available | human_readable) }} free | {{ m.pct_used }}%
+            {% endfor %}
