@@ -24,7 +24,14 @@ pipx inject ansible passlib
 ansible --version
 ```
 
-### 🚀 Ansible Ping Check
+### 🚀 Setup Host & Server
+
+```shell
+cp servers.yml.example servers.yml
+cp hosts.ini.example host.ini
+```
+
+### 🎃 Ansible Ping Check
 ```shell
 cd ~/ansible-lab
 ansible local -m ping -o
@@ -85,6 +92,16 @@ ansible-playbook playbooks/base.yml --tags packages -l dev
 ansible-playbook playbooks/user_create.yml -l dev \
   -e create_user_name=username \
   -e create_user_password_plain='changeme'
+```
+
+### 🏆 Password User
+
+```shell
+ansible-playbook playbooks/user_password.yml -l dev \
+  -e target_user=username \
+  -e new_password_plain='P@55w0rd'
+  -e force_expire=true
+  -e unlock_account=true
 ```
 
 ### 🏆 Delete User
