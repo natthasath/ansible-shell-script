@@ -1,0 +1,172 @@
+# playbooks/wp_core_version_export.yml
+---
+- name: Export WordPress core version per ISPConfig site (filename = domain)
+  hosts: servers
+  gather_facts: false
+  become: true
+
+  vars:
+    export_base: "{{ lookup('env','HOME') }}/ansible-lab/export/version"
+    clients_root: "/var/www/clients"
+    web_dir_regex: "^/var/www/clients/client[^/]+/web[^/]+/web$"
+    wp_bin: "wp"
+    date_stamp: "{{ lookup('pipe', 'date +%F') }}"
+
+  tasks:
+    # 1) Discover WordPress roots
+    - name: Find directories up to depth 5 under {{ clients_root }}
+      ansible.builtin.find:
+        paths: "{{ clients_root }}"
+        file_type: directory
+        recurse: true
+        depth: 5
+      register: found_dirs
+
+    - name: Filter only WordPress roots (…/clientX/webY/web)
+      ansible.builtin.set_fact:
+        web_dirs: >-
+          {{
+            found_dirs.files
+            | selectattr('path', 'match', web_dir_regex)
+            | map(attribute='path')
+            | list
+          }}
+
+    - name: Fail if no WordPress web roots are found
+      ansible.builtin.fail:
+        msg: "No WP web roots matched {{ web_dir_regex }} under {{ clients_root }}"
+      when: web_dirs | length == 0
+
+    # 2) Identify site user from directory owner
+    - name: Stat each web root to get owner (site user)
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: true
+      loop: "{{ web_dirs }}"
+      loop_control:
+        label: "{{ item }}"
+      register: web_stats
+
+    - name: Build sites list [{path, user, name}]
+      ansible.builtin.set_fact:
+        sites: "{{ sites | default([]) + [ {
+          'path': item.item,
+          'user': (item.stat.pw_name | default('root')),
+          'name': (item.item | regex_replace('.*/(client[^/]+)/([^/]+)/web$', '\\1_\\2'))} ] }}"
+      loop: "{{ web_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # 3) Get real site URL (home) and derive filename-friendly domain
+    - name: Get primary site URL (home) for each WP root
+      ansible.builtin.command:
+        argv:
+          - "{{ wp_bin }}"
+          - option
+          - get
+          - home
+          - "--path={{ item.path }}"
+          - "--skip-plugins"
+          - "--skip-themes"
+      become_user: "{{ item.user }}"
+      register: home_urls
+      changed_when: false
+      failed_when: false
+      loop: "{{ sites }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.user }}) -> {{ item.path }}"
+
+    - name: Merge domain filename (fname) into sites list
+      ansible.builtin.set_fact:
+        sites_named: >-
+          {{
+            sites_named | default([]) + [
+              item.0 | combine({
+                'fname': (
+                  (item.1.stdout | default('') | trim) != ''
+                ) | ternary(
+                    (item.1.stdout | default('') | trim
+                     | regex_replace('^https?://', '')
+                     | regex_replace('/.*$', '')
+                     | regex_replace(':.*$', '')
+                     | regex_replace('[^A-Za-z0-9._-]', '_')),
+                    item.0.name
+                  )
+              })
+            ]
+          }}
+      with_together:
+        - "{{ sites }}"
+        - "{{ home_urls.results }}"
+
+    # 4) Ensure export folder for this host on CONTROLLER
+    - name: Ensure export folder exists on controller for this host
+      ansible.builtin.file:
+        path: "{{ export_base }}/{{ inventory_hostname }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+
+    # 5) wp core version per site
+    - name: Get WordPress core version for each site
+      ansible.builtin.command:
+        argv:
+          - "{{ wp_bin }}"
+          - core
+          - version
+          - "--path={{ item.path }}"
+      become_user: "{{ item.user }}"
+      register: wp_core_versions
+      changed_when: false
+      failed_when: false
+      loop: "{{ sites_named }}"
+      loop_control:
+        label: "{{ item.fname }} ({{ item.user }}) -> {{ item.path }}"
+
+    # 6) Write version to controller (one file per site, named by domain)
+    - name: Write per-site version to controller
+      ansible.builtin.copy:
+        content: |-
+          host,site,path,version,date
+          {{ inventory_hostname }},{{ item.item.fname }},{{ item.item.path }},{{ (item.stdout | trim) | default('UNKNOWN') }},{{ date_stamp }}
+        dest: "{{ export_base }}/{{ inventory_hostname }}/{{ item.item.fname }}_wp-core-{{ date_stamp }}.csv"
+        mode: "0644"
+      when: item.rc == 0
+      delegate_to: localhost
+      become: false
+      loop: "{{ wp_core_versions.results }}"
+      loop_control:
+        label: "{{ item.item.fname }}_wp-core-{{ date_stamp }}.csv"
+
+    # 7) Optional: write error logs for failed sites
+    - name: Write error logs for failed sites (controller)
+      ansible.builtin.copy:
+        content: |-
+          Host: {{ inventory_hostname }}
+          Site: {{ item.item.fname }}
+          Path: {{ item.item.path }}
+          User: {{ item.item.user }}
+          RC: {{ item.rc }}
+          STDOUT:
+          {{ item.stdout }}
+          STDERR:
+          {{ item.stderr }}
+        dest: "{{ export_base }}/{{ inventory_hostname }}/{{ item.item.fname }}_wp-core-{{ date_stamp }}.ERROR.txt"
+        mode: "0644"
+      when: item.rc != 0
+      delegate_to: localhost
+      become: false
+      loop: "{{ wp_core_versions.results }}"
+      loop_control:
+        label: "{{ item.item.fname }}_wp-core-{{ date_stamp }}.ERROR.txt"
+
+    # 8) Summary
+    - name: Summary
+      ansible.builtin.debug:
+        msg: |-
+          Host: {{ inventory_hostname }}
+          Export dir: {{ export_base }}/{{ inventory_hostname }}
+          Sites processed: {{ sites_named | length }}
+          OK: {{ (wp_core_versions.results | selectattr('rc','equalto',0) | list | length) }},
+          FAILED: {{ (wp_core_versions.results | selectattr('rc','ne',0) | list | length) }}

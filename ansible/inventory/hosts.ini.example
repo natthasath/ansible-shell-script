@@ -1,0 +1,12 @@
+[local]
+localhost ansible_connection=local
+
+[servers:children]
+dev
+prod
+
+[dev]
+srv1  ansible_host=10.10.10.10 ansible_user=admin ansible_port=22 ansible_ssh_private_key_file=~/.ssh/id_ed25519
+
+[prod]
+srv1  ansible_host=10.10.10.10 ansible_user=admin ansible_port=22 ansible_ssh_private_key_file=~/.ssh/id_ed25519

@@ -1,0 +1,18 @@
+- name: Hello & System sanity
+  hosts: all
+  gather_facts: true
+  become: false
+
+  tasks:
+    - name: Say hello
+      debug:
+        msg: "Hello from {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
+
+    - name: Check uptime
+      command: uptime
+      register: uptime_out
+      changed_when: false
+
+    - name: Show uptime
+      debug:
+        var: uptime_out.stdout

@@ -1,0 +1,77 @@
+# playbooks/smtp_587_connectivity.yml
+---
+- name: Check STARTTLS SMTP (587) connectivity via netcat
+  hosts: servers
+  gather_facts: false
+  become: true
+
+  vars:
+    # Targets to test; you can add more items if needed
+    smtp_targets:
+      - name: Gmail
+        host: smtp.gmail.com
+        port: 587
+      - name: Office365
+        host: smtp.office365.com
+        port: 587
+
+    # Netcat options
+    nc_timeout: 3        # seconds for -w
+    force_ipv4: true     # set to false if you want to allow IPv6 too
+
+  pre_tasks:
+    - name: Ensure netcat is installed (OpenBSD flavor on Ubuntu)
+      ansible.builtin.apt:
+        name: netcat-openbsd
+        state: present
+        update_cache: yes
+
+  tasks:
+    - name: Run nc test to each SMTP target
+      ansible.builtin.command: >
+        nc {{ '-4' if force_ipv4 else '' }} -vz -w{{ nc_timeout }} {{ item.host }} {{ item.port }}
+      register: nc_results
+      changed_when: false
+      failed_when: false     # don't fail here; we summarize and assert later
+      loop: "{{ smtp_targets }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.host }}:{{ item.port }})"
+
+    - name: Build structured results
+      ansible.builtin.set_fact:
+        smtp_checks: "{{ smtp_checks | default([]) + [ {
+            'name': item.item.name,
+            'host': item.item.host,
+            'port': item.item.port,
+            'rc': item.rc,
+            'ok': (item.rc == 0),
+            'stdout': item.stdout,
+            'stderr': item.stderr
+          } ] }}"
+
+      loop: "{{ nc_results.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Compose multiline report
+      ansible.builtin.set_fact:
+        report_text: |-
+          Host: {{ inventory_hostname }}
+          Command template: nc {{ '-4' if force_ipv4 else '' }} -vz -w{{ nc_timeout }} <host> 587
+          ---- Results ----
+          {% for r in smtp_checks %}
+          {{ '%-10s'|format(r.name) }} | {{ r.host }}:{{ r.port }} | {{ 'OPEN' if r.ok else 'BLOCKED' }}
+            rc={{ r.rc }} | out="{{ (r.stdout | trim) }}" | err="{{ (r.stderr | trim) }}"
+          {% endfor %}
+
+    - name: Print SMTP 587 connectivity report
+      ansible.builtin.debug:
+        msg: "{{ report_text }}"
+
+    - name: Assert all SMTP 587 targets are reachable
+      ansible.builtin.assert:
+        that:
+          - (smtp_checks | selectattr('ok','equalto',true) | list | length) == (smtp_checks | length)
+        fail_msg: >-
+          One or more SMTP 587 checks failed. See previous task output for details.
+        success_msg: All SMTP 587 checks succeeded.
