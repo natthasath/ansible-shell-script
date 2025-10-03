@@ -147,3 +147,9 @@ ansible-playbook playbooks/wordpress/wp_core_version.yml -l dev
 ```shell
 ansible-playbook playbooks/wordpress/wp_user_list.yml -l dev
 ```
+
+### 🏆 Install wp-cli
+
+```shell
+ansible-playbook playbooks/wordpress/wp_cli_install.yml -l dev
+```

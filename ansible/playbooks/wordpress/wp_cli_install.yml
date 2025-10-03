@@ -1,0 +1,90 @@
+# playbooks/wp_cli_install.yml
+---
+- name: Install WP-CLI (verified, idempotent) with APT Label fix
+  hosts: servers
+  gather_facts: true
+  become: true
+
+  vars:
+    # Official PHAR
+    wp_cli_phar_url: "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
+    # Install target (fixed)
+    wp_cli_bin_path: "/usr/local/bin/wp"
+    # Temp download path
+    wp_cli_tmp_path: "/tmp/wp-cli.phar"
+    # Set true to force re-install even if wp exists
+    force_reinstall: false
+
+  pre_tasks:
+    # Some PPAs (e.g., ondrej/php) changed Release 'Label' and block updates unless accepted.
+    - name: APT | Accept changed Release Info (Label) once
+      ansible.builtin.command: apt-get update -o Acquire::AllowReleaseInfoChange::Label=true
+      changed_when: false
+      failed_when: false
+
+    # If you also hit Suite changes in other repos, uncomment the next task.
+    # - name: APT | Accept changed Release Info (Suite) once
+    #   ansible.builtin.command: apt-get update -o Acquire::AllowReleaseInfoChange::Suite=true
+    #   changed_when: false
+    #   failed_when: false
+
+    - name: Ensure required packages are present (php-cli, curl, CA certs, unzip, less)
+      ansible.builtin.apt:
+        name:
+          - php-cli
+          - curl
+          - ca-certificates
+          - unzip
+          - less
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600
+
+  tasks:
+    - name: Check if wp already installed
+      ansible.builtin.stat:
+        path: "{{ wp_cli_bin_path }}"
+      register: wp_stat
+
+    - name: Skip notice (already present; use -e force_reinstall=true to refresh)
+      ansible.builtin.debug:
+        msg: "WP-CLI already present at {{ wp_cli_bin_path }}."
+      when: wp_stat.stat.exists and not force_reinstall
+
+    - name: Download WP-CLI PHAR to temp
+      ansible.builtin.get_url:
+        url: "{{ wp_cli_phar_url }}"
+        dest: "{{ wp_cli_tmp_path }}"
+        mode: "0644"
+      when: (not wp_stat.stat.exists) or force_reinstall
+
+    - name: Verify PHAR runs
+      ansible.builtin.command: "php {{ wp_cli_tmp_path }} --info"
+      register: wp_verify
+      changed_when: false
+      when: (not wp_stat.stat.exists) or force_reinstall
+
+    - name: Install WP-CLI to /usr/local/bin/wp (chmod +x)
+      ansible.builtin.copy:
+        src: "{{ wp_cli_tmp_path }}"
+        dest: "{{ wp_cli_bin_path }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      when: (not wp_stat.stat.exists) or force_reinstall
+
+    - name: Remove temp PHAR
+      ansible.builtin.file:
+        path: "{{ wp_cli_tmp_path }}"
+        state: absent
+      when: (not wp_stat.stat.exists) or force_reinstall
+
+    - name: Final sanity | /usr/local/bin/wp --info
+      ansible.builtin.command: "{{ wp_cli_bin_path }} --info"
+      register: wp_info
+      changed_when: false
+
+    - name: Print WP-CLI info
+      ansible.builtin.debug:
+        msg: "{{ wp_info.stdout_lines }}"
