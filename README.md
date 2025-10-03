@@ -133,11 +133,17 @@ ansible-playbook playbooks/check_egress_587.yml -l dev
 ### 🏆 Export Plugin Wordpress
 
 ```shell
-ansible-playbook playbooks/wordpress/wp_plugins_export.yml -l dev
+ansible-playbook playbooks/wordpress/wp_plugin_list.yml -l dev
 ```
 
 ### 🏆 Export Core Version Wordpress
 
 ```shell
 ansible-playbook playbooks/wordpress/wp_core_version.yml -l dev
+```
+
+### 🏆 Export User Wordpress
+
+```shell
+ansible-playbook playbooks/wordpress/wp_user_list.yml -l dev
 ```

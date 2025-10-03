@@ -1,4 +1,4 @@
-# playbooks/wp_plugins_export.yml
+# playbooks/wp_plugin_list.yml
 ---
 - name: List WordPress plugins for all ISPConfig sites and export per-site CSV to controller
   hosts: servers
