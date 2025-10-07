@@ -1,0 +1,7 @@
+# collections/requirements.yml
+collections:
+  - name: ansible.windows        # Core Windows modules
+  - name: community.windows      # Extra Windows modules (AD/DFS/Hyper-V, utilities)
+  - name: chocolatey.chocolatey  # Optional: manage packages via Chocolatey
+  - name: microsoft.ad           # Optional: deep Active Directory tasks
+  

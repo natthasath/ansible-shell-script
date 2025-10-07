@@ -1,0 +1,99 @@
+# collections/requirements.yml
+# Purpose: lock down the exact Collections your project needs so every dev/CI/Prod
+# installs the same set. Install with:
+#   ansible-galaxy collection install -r collections/requirements.yml
+#
+# Tip: Pin exact or constrained versions for reproducibility. Update intentionally.
+# These versions are EXAMPLES—adjust to what your org has validated.
+
+collections:
+
+  ###########################################################################
+  # Cloud – AWS / Azure / GCP
+  # Use these when managing cloud infra (EC2, IAM, VPCs, Azure Resources,
+  # GCP Compute/Storage/IAM, etc.). Requires appropriate SDKs/credentials.
+  ###########################################################################
+  - name: amazon.aws
+    version: ">=9.0.0,<10.0.0"   # AWS modules & plugins
+  - name: azure.azcollection
+    version: ">=1.20.0,<2.0.0"   # Azure modules (needs Azure Python SDKs)
+  - name: google.cloud
+    version: ">=1.5.0,<2.0.0"    # GCP modules (needs google-auth etc.)
+
+  ###########################################################################
+  # Containers / DevOps – Docker, Kubernetes, Podman
+  # For building images, orchestrating containers, and talking to clusters.
+  ###########################################################################
+  - name: community.docker
+    version: ">=3.9.0,<4.0.0"    # Docker Engine/Compose modules & connection plugins
+  - name: kubernetes.core
+    version: ">=3.0.0,<4.0.0"    # Manage K8s objects via kubeconfig
+  - name: containers.podman
+    version: ">=1.13.0,<2.0.0"   # Podman modules (rootless-friendly)
+
+  ###########################################################################
+  # Network devices – IOS, EOS, Junos, etc.
+  # For automating network gear. You’ll typically use network_cli/httpapi
+  # connections and device-specific modules.
+  ###########################################################################
+  - name: cisco.ios
+    version: ">=5.0.0,<6.0.0"
+  - name: arista.eos
+    version: ">=6.0.0,<7.0.0"
+  - name: junipernetworks.junos
+    version: ">=5.0.0,<6.0.0"
+
+  ###########################################################################
+  # Windows – Win hosts management
+  # Use with winrm/psrp connections. Provides win_* modules and utilities.
+  ###########################################################################
+  - name: ansible.windows
+    version: ">=2.2.0,<3.0.0"
+  - name: community.windows
+    version: ">=2.2.0,<3.0.0"
+
+  ###########################################################################
+  # Popular utilities (not builtin)
+  # Extra modules/filters used constantly: POSIX helpers, crypto/PKI, DBs.
+  ###########################################################################
+  - name: ansible.posix
+    version: ">=1.5.0,<2.0.0"    # e.g., timezone, synchronize (rsync), selinux
+  - name: community.crypto
+    version: ">=2.18.0,<3.0.0"   # generate keys/CSRs, cert ops
+  - name: community.mysql
+    version: ">=3.9.0,<4.0.0"    # MySQL/MariaDB users/dbs/privs
+  - name: community.postgresql
+    version: ">=3.3.0,<4.0.0"    # PostgreSQL roles/dbs/privs
+
+  ###########################################################################
+  # Extra plugins/filters/lookups
+  # Many handy filters/callbacks/lookups live here rather than in ansible.builtin.
+  ###########################################################################
+  - name: community.general
+    version: ">=9.0.0,<11.0.0"   # Swiss-army knife: modules, filters, lookups
+
+  ###########################################################################
+  # Roles from Galaxy/Automation Hub (example placeholders)
+  # Most third-party roles declare their own collection deps. Keeping them
+  # as collections ensures CI/dev/prod are consistent.
+  # If your org uses a Private Automation Hub/Galaxy mirror, set `source:`.
+  ###########################################################################
+  - name: corp.platform
+    version: "1.4.2"             # Example internal collection that hosts shared roles
+    source: https://automation-hub.example.com/api/galaxy/
+
+  ###########################################################################
+  # From Git (in-house collection example)
+  # Useful when you haven’t published to Galaxy/Hub yet. Pin to tag/commit.
+  ###########################################################################
+  - name: git+ssh://git@github.com/acme/inhouse_collection.git
+    type: git
+    version: v1.2.3              # or a commit SHA/branch
+
+# Notes:
+# - Avoid floating “latest” in CI. Constrain majors to dodge breaking changes.
+# - If installing into the repo (vendor-in): use
+#     ansible-galaxy collection install -r collections/requirements.yml -p ./collections
+#   and set in ansible.cfg:
+#     [defaults]
+#     collections_paths = ./collections:~/.ansible/collections:/usr/share/ansible/collections

@@ -78,6 +78,12 @@ ansible-vault encrypt group_vars/servers.yml
 ansible servers -m ping -o --ask-vault-pass
 ```
 
+### 📩 Install Collections
+
+```shell
+ansible-galaxy collection install -r collections/requirements.yml --force
+```
+
 ### 🏆 Install Package
 
 ```shell
@@ -146,6 +152,12 @@ ansible-playbook playbooks/wordpress/wp_core_version.yml -l dev
 
 ```shell
 ansible-playbook playbooks/wordpress/wp_user_list.yml -l dev
+```
+
+### 🏆 Export Menu Wordpress
+
+```shell
+ansible-playbook playbooks/wordpress/wp_menu_item_list.yml -l dev
 ```
 
 ### 🏆 Install wp-cli

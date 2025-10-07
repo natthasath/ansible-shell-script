@@ -1,0 +1,257 @@
+# playbooks/wp_menu_item_list.yml
+---
+- name: Export WordPress menu items (resolve real WP path; one CSV per site named by domain)
+  hosts: servers
+  gather_facts: true
+  become: true
+
+  vars:
+    ispconfig_root: "/var/www/clients"
+    wp_root_regex: "^/var/www/clients/client[^/]+/web[0-9]+/web$"
+    common_subdirs: ["public", "public_html", "html", "htdocs", "webroot", "current"]
+
+    export_root_local: "{{ lookup('env','HOME') }}/ansible-lab/export/menu"
+    export_prefix: "wp-menus"
+    export_date: "{{ lookup('pipe', 'date +%F') }}"
+
+    # Override with -e wp_cmd=/usr/local/bin/wp if needed
+    wp_cmd: "wp"
+    wp_item_fields: "db_id,title,url,type,object,object_id,menu_item_parent,position,menu_order,attr_title,target,classes,xfn,description"
+    extra_path: "/usr/local/bin:/usr/bin:/bin"
+
+  pre_tasks:
+    - name: Guard | Debian/Ubuntu only
+      ansible.builtin.assert:
+        that: ansible_facts.os_family == "Debian"
+        fail_msg: "This play targets Debian/Ubuntu family."
+
+    - name: Ensure wp-cli exists on remote (as root)
+      ansible.builtin.command:
+        argv: ["bash","-lc","command -v {{ wp_cmd }}"]
+      changed_when: false
+
+    - name: Ensure local export folder for this host (controller)
+      ansible.builtin.file:
+        path: "{{ export_root_local }}/{{ inventory_hostname }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+
+  tasks:
+    ####################################################################
+    # 1) Discover candidate web roots under ISPConfig
+    ####################################################################
+    - name: Find directories up to depth 4 under {{ ispconfig_root }}
+      ansible.builtin.find:
+        paths: "{{ ispconfig_root }}"
+        file_type: directory
+        recurse: true
+        depth: 4
+      register: found_dirs
+
+    - name: Initialize sites list
+      ansible.builtin.set_fact:
+        sites: []
+
+    - name: Append matched roots with inferred web_user
+      ansible.builtin.set_fact:
+        sites: "{{ sites + [ {'root': path, 'web_user': (path | dirname | basename)} ] }}"
+      loop: "{{ found_dirs.files | map(attribute='path') | list }}"
+      loop_control:
+        loop_var: path
+      when: path is match(wp_root_regex)
+
+    - name: Stop if no candidates
+      ansible.builtin.fail:
+        msg: "No paths matched {{ wp_root_regex }} under {{ ispconfig_root }}"
+      when: sites | length == 0
+
+    ####################################################################
+    # 2) Build per-site candidate list using marker files (no parsing)
+    ####################################################################
+    - name: Find WP marker files (wp-load.php / wp-config.php) under each site
+      ansible.builtin.find:
+        paths: "{{ item.root }}"
+        recurse: true
+        file_type: file
+        patterns:
+          - "wp-load.php"
+          - "wp-config.php"
+      register: markers
+      loop: "{{ sites }}"
+      loop_control:
+        label: "{{ item.web_user }}"
+
+    - name: Build candidates_by_site (root + common subdirs + marker dirs)
+      ansible.builtin.set_fact:
+        candidates_by_site: "{{ (candidates_by_site | default({})) | combine({
+          item.item.web_user:
+            (
+              [ item.item.root ]
+              + (common_subdirs | map('regex_replace','^(.*)$', item.item.root + '/\\1') | list)
+              + ( (item.files | default([])) | map(attribute='path') | map('dirname') | list )
+            ) | map('regex_replace','/$','') | list | unique}) }}"
+      loop: "{{ markers.results }}"
+      loop_control:
+        label: "{{ item.item.web_user }}"
+
+    ####################################################################
+    # 3) Probe candidates to pick real_root (first that passes)
+    ####################################################################
+    - name: Init list of sites_with_candidates
+      ansible.builtin.set_fact:
+        sites_with_candidates: []
+
+    - name: Build sites_with_candidates per site
+      ansible.builtin.set_fact:
+        sites_with_candidates: "{{ sites_with_candidates + [ {
+          'web_user': site.web_user,
+          'root': site.root,
+          'candidates': (candidates_by_site.get(site.web_user, []))} ] }}"
+      loop: "{{ sites }}"
+      loop_control:
+        loop_var: site
+
+    - name: Init list of probe jobs
+      ansible.builtin.set_fact:
+        probe_jobs: []
+
+    - name: Expand probe jobs from sites_with_candidates
+      ansible.builtin.set_fact:
+        probe_jobs: "{{ probe_jobs + [ {
+          'web_user': item.0.web_user,
+          'root': item.0.root,
+          'cand': item.1} ] }}"
+      loop: "{{ sites_with_candidates | subelements('candidates') }}"
+
+    - name: Probe each candidate (marker files or wp core is-installed)
+      ansible.builtin.shell: |
+        set -e
+        C="{{ item.cand }}"
+        if [ -f "$C/wp-load.php" ] || [ -f "$C/wp-config.php" ]; then
+          echo "$C"
+          exit 0
+        fi
+        {{ wp_cmd }} core is-installed --path="$C" >/dev/null 2>&1 && { echo "$C"; exit 0; }
+        exit 1
+      args:
+        executable: /bin/bash
+      environment:
+        PATH: "{{ extra_path }}:{{ ansible_env.PATH | default('') }}"
+      become_user: "{{ item.web_user }}"
+      register: probed
+      changed_when: false
+      failed_when: false
+      loop: "{{ probe_jobs }}"
+      loop_control:
+        label: "{{ item.web_user }} -> {{ item.cand }}"
+
+    - name: Build real_root_map (first passing candidate per web_user)
+      ansible.builtin.set_fact:
+        real_root_map: "{{ (real_root_map | default({})) | combine({
+          site.web_user: (
+            probed.results
+            | selectattr('rc','equalto',0)
+            | selectattr('item.web_user','equalto', site.web_user)
+            | map(attribute='stdout')
+            | map('trim')
+            | select('ne','')
+            | list
+            | first
+            | default('')
+          )}) }}"
+      loop: "{{ sites }}"
+      loop_control:
+        loop_var: site
+        label: "{{ site.web_user }}"
+
+    - name: Build list of installed sites with real_root
+      ansible.builtin.set_fact:
+        good_sites: "{{ (good_sites | default([])) + ([ {
+          'web_user': site.web_user,
+          'root': site.root,
+          'real_root': (real_root_map.get(site.web_user, '') | trim)} ] if (real_root_map.get(site.web_user, '') | trim) != '' else []) }}"
+      loop: "{{ sites }}"
+      loop_control:
+        loop_var: site
+
+    - name: Stop if no WordPress sites detected after resolving real paths
+      ansible.builtin.fail:
+        msg: "No WordPress installations detected after resolving real paths."
+      when: good_sites | length == 0
+
+    ####################################################################
+    # 4) Export: one CSV per site named by domain, using real_root
+    ####################################################################
+    - name: Export all menus for a site into one CSV named by domain (using real_root)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        ROOT="{{ item.real_root }}"
+        OUTDIR="/tmp/{{ export_prefix }}-{{ export_date }}-{{ item.web_user }}"
+        mkdir -p "$OUTDIR"
+
+        SITEURL="$({{ wp_cmd }} option get siteurl --path="$ROOT" --quiet 2>/dev/null || true)"
+        if [ -z "$SITEURL" ]; then
+          SITEURL="$({{ wp_cmd }} option get home --path="$ROOT" --quiet 2>/dev/null || true)"
+        fi
+        DOMAIN="$(printf "%s" "${SITEURL:-unknown}" | sed -E 's#^[a-zA-Z]+://##; s#/.*$##')"
+        [ -z "$DOMAIN" ] && DOMAIN="unknown"
+        SAFE_DOMAIN="$(printf "%s" "$DOMAIN" | tr -c 'A-Za-z0-9_.-' '_' )"
+
+        OUTFILE="$OUTDIR/${SAFE_DOMAIN}_menus-{{ export_date }}.csv"
+        HEADER="menu,{{ wp_item_fields }}"
+        printf "%s\n" "$HEADER" > "$OUTFILE"
+
+        {{ wp_cmd }} menu list --path="$ROOT" --fields=name --format=csv \
+          | tail -n +2 \
+          | sed -e 's/^"//' -e 's/"$//' \
+          | awk 'NF>0' \
+          | while IFS= read -r NAME; do
+              {{ wp_cmd }} menu item list "$NAME" \
+                --path="$ROOT" \
+                --fields={{ wp_item_fields }} \
+                --format=csv \
+              | tail -n +2 \
+              | awk -v m="$NAME" 'BEGIN{OFS=","} {print m "," $0}' >> "$OUTFILE" \
+              || true
+            done
+
+        echo "$OUTFILE"
+      args:
+        executable: /bin/bash
+      environment:
+        PATH: "{{ extra_path }}:{{ ansible_env.PATH | default('') }}"
+      become_user: "{{ item.web_user }}"
+      register: site_export
+      changed_when: false
+      failed_when: false
+      loop: "{{ good_sites }}"
+      loop_control:
+        label: "{{ item.web_user }}: {{ item.real_root }}"
+
+    - name: Find generated domain CSVs on remote
+      ansible.builtin.find:
+        paths: "{{ item.stdout | dirname }}"
+        patterns: "*_menus-{{ export_date }}.csv"
+        file_type: file
+      register: exported_csvs
+      when: item.stdout is defined and (item.stdout | trim) != ""
+      loop: "{{ site_export.results }}"
+      loop_control:
+        label: "{{ item.item.web_user }}"
+
+    - name: Fetch CSV files to controller (per host folder)
+      ansible.builtin.fetch:
+        src: "{{ csv.path }}"
+        dest: "{{ export_root_local }}/{{ inventory_hostname }}/"
+        flat: true
+      loop: "{{ (exported_csvs.results | default([])) | map(attribute='files') | default([]) | sum(start=[]) }}"
+      loop_control:
+        loop_var: csv
+
+    - name: Summary path (controller)
+      ansible.builtin.debug:
+        msg: "Exports stored under {{ export_root_local }}/{{ inventory_hostname }}/"
+      delegate_to: localhost
+      become: false
