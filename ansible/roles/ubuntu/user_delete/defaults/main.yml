@@ -1,0 +1,5 @@
+---
+# Default variables for user_delete role
+delete_user_name: ""                     # Username to delete (required)
+protected_users:                         # Users that cannot be deleted
+  - root

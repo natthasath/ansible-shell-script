@@ -1,0 +1,74 @@
+---
+# Main tasks for user_delete role
+
+- name: Guard | Ensure Debian/Ubuntu family
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == "Debian"
+    fail_msg: "This role targets Debian/Ubuntu family."
+
+- name: Guard | Ensure delete_user_name is set and not protected
+  ansible.builtin.assert:
+    that:
+      - delete_user_name is string
+      - delete_user_name | length > 0
+      - delete_user_name not in protected_users
+    fail_msg: "Refusing to delete an empty or protected username."
+
+- name: Check if user exists
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ delete_user_name }}"
+  register: user_entry
+  failed_when: false
+
+- name: Kill processes owned by the user
+  ansible.builtin.command: "pkill -KILL -u {{ delete_user_name }}"
+  register: pkill_result
+  changed_when: pkill_result.rc == 0
+  failed_when: false
+  when: 
+    - user_entry is defined
+    - user_entry is not failed
+    - (user_entry.ansible_facts.getent_passwd | length) > 0
+
+- name: Remove user's crontab
+  ansible.builtin.command: "crontab -r -u {{ delete_user_name }}"
+  register: crontab_rm
+  changed_when: crontab_rm.rc == 0
+  failed_when: false
+  when: 
+    - user_entry is defined
+    - user_entry is not failed
+    - (user_entry.ansible_facts.getent_passwd | length) > 0
+
+- name: Remove sudoers.d entry
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/90-{{ delete_user_name }}"
+    state: absent
+  when: 
+    - user_entry is defined
+    - user_entry is not failed
+    - (user_entry.ansible_facts.getent_passwd | length) > 0
+
+- name: Delete the user account (remove home and mail)
+  ansible.builtin.user:
+    name: "{{ delete_user_name }}"
+    state: absent
+    remove: true
+  when: 
+    - user_entry is defined
+    - user_entry is not failed
+    - (user_entry.ansible_facts.getent_passwd | length) > 0
+
+- name: Extra cleanup for leftover directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/home/{{ delete_user_name }}"
+    - "/var/mail/{{ delete_user_name }}"
+  when: 
+    - user_entry is defined
+    - user_entry is not failed
+    - (user_entry.ansible_facts.getent_passwd | length) > 0

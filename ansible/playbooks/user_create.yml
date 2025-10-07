@@ -1,72 +1,14 @@
-# playbooks/user_create.yml
 ---
-- name: Create local admin user on Ubuntu (add to sudo)
+- name: Create local admin user on Ubuntu
   hosts: servers
   gather_facts: true
   become: true
 
   vars:
-    # === Adjust as needed ===
-    create_user_name: "devops"             # Username to create
-    create_user_uid: null                   # Set a fixed UID (e.g., 1010) or keep null to auto-assign
-    create_user_shell: "/bin/bash"          # Default shell
-    create_user_ssh_pubkey: "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}"  # Public key to authorize
-    create_user_password_plain: ""          # Plaintext UNIX password (leave empty to skip password)
-    sudo_nopasswd: false                    # true = passwordless sudo (convenient, but be cautious)
+    # Override role defaults as needed
+    create_user_name: "devops"
+    create_user_ssh_pubkey: "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}"
+    sudo_nopasswd: false
 
-  pre_tasks:
-    - name: Guard | Ensure Debian/Ubuntu family
-      ansible.builtin.assert:
-        that:
-          - ansible_facts.os_family == "Debian"
-        fail_msg: "This playbook targets Debian/Ubuntu family."
-        success_msg: "Debian/Ubuntu confirmed."
-
-    - name: Ensure sudo package is present
-      ansible.builtin.apt:
-        name: sudo
-        state: present
-        update_cache: yes
-
-  tasks:
-    - name: Create user (home, shell) and add to sudo group
-      ansible.builtin.user:
-        name: "{{ create_user_name }}"
-        uid: "{{ create_user_uid if create_user_uid is not none else omit }}"
-        shell: "{{ create_user_shell }}"
-        groups: "sudo"            # Add user to sudo group (Ubuntu/Debian)
-        append: true
-        create_home: true
-        state: present
-        password: >-
-          {{ (create_user_password_plain | length > 0)
-             | ternary( create_user_password_plain | password_hash('sha512'), omit) }}
-      register: user_created
-
-    - name: Ensure .ssh directory exists
-      ansible.builtin.file:
-        path: "/home/{{ create_user_name }}/.ssh"
-        state: directory
-        owner: "{{ create_user_name }}"
-        group: "{{ create_user_name }}"
-        mode: "0700"
-
-    - name: Install authorized_key for the user
-      ansible.builtin.authorized_key:
-        user: "{{ create_user_name }}"
-        state: present
-        key: "{{ create_user_ssh_pubkey }}"
-        manage_dir: false
-      when: create_user_ssh_pubkey | length > 0
-
-    - name: (Optional) Configure passwordless sudo via sudoers.d
-      ansible.builtin.copy:
-        dest: "/etc/sudoers.d/90-{{ create_user_name }}"
-        owner: root
-        group: root
-        mode: "0440"
-        content: "{{ create_user_name }} ALL=(ALL) NOPASSWD:ALL"
-        validate: "visudo -cf %s"
-      when: sudo_nopasswd | bool
-
-  handlers: []
+  roles:
+    - role: user_create

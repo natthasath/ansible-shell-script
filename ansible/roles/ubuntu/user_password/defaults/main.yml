@@ -1,0 +1,7 @@
+---
+# Default variables for user_password role
+target_user: ""                          # Username to change password (required)
+new_password_hash: ""                    # SHA-512 hash ($6$...)
+new_password_plain: ""                   # Plaintext password
+force_expire: false                      # Force password change on next login
+unlock_account: false                    # Unlock locked accounts

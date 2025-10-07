@@ -1,0 +1,8 @@
+---
+# Default variables for user_create role
+create_user_name: "devops"
+create_user_uid: null                    # Auto-assign if null
+create_user_shell: "/bin/bash"
+create_user_ssh_pubkey: ""               # SSH public key (optional)
+create_user_password_plain: ""           # Plaintext password (optional)
+sudo_nopasswd: false                     # Enable passwordless sudo

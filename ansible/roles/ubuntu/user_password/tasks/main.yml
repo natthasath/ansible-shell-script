@@ -1,0 +1,57 @@
+---
+# Main tasks for user_password role
+
+- name: Guard | Debian/Ubuntu only
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == "Debian"
+    fail_msg: "This role targets Debian/Ubuntu family."
+
+- name: Guard | target_user must be non-empty and not root
+  ansible.builtin.assert:
+    that:
+      - target_user is string
+      - target_user | length > 0
+      - target_user != "root"
+    fail_msg: "Refusing to change password for empty username or 'root'."
+
+- name: Check if target user exists
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ target_user }}"
+  register: user_entry
+  failed_when: false
+
+- name: Fail if user does not exist
+  ansible.builtin.fail:
+    msg: "User '{{ target_user }}' does not exist on this host."
+  when: 
+    - user_entry is failed or (user_entry.ansible_facts.getent_passwd | length) == 0
+
+- name: Guard | Ensure password source is provided
+  ansible.builtin.assert:
+    that:
+      - (new_password_hash | length) > 0 or (new_password_plain | length) > 0
+    fail_msg: "Provide either new_password_hash or new_password_plain."
+
+- name: Set UNIX password
+  ansible.builtin.user:
+    name: "{{ target_user }}"
+    update_password: always
+    password: >-
+      {{
+        (new_password_hash | length > 0)
+          | ternary(new_password_hash,
+                    (new_password_plain | password_hash('sha512')))
+      }}
+
+- name: Unlock account if requested
+  ansible.builtin.user:
+    name: "{{ target_user }}"
+    password_lock: false
+  when: unlock_account | bool
+
+- name: Force password expire on next login
+  ansible.builtin.command: "chage -d 0 {{ target_user }}"
+  changed_when: true
+  when: force_expire | bool

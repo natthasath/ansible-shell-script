@@ -1,0 +1,117 @@
+---
+# Main tasks for user_create role with improved error handling
+
+- name: Guard | Ensure Debian/Ubuntu family
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == "Debian"
+    fail_msg: "This role targets Debian/Ubuntu family."
+    success_msg: "Debian/Ubuntu confirmed."
+
+# Handle potential apt locks and issues
+- name: Wait for automatic apt updates to complete
+  ansible.builtin.systemd:
+    name: apt-daily.service
+    state: stopped
+  failed_when: false
+  when: ansible_facts.distribution_version is version('16.04', '>=')
+
+- name: Wait for apt locks to be released
+  ansible.builtin.wait_for:
+    path: "{{ item }}"
+    state: absent
+    timeout: 300
+  loop:
+    - /var/lib/apt/lists/lock
+    - /var/cache/apt/archives/lock
+    - /var/lib/dpkg/lock-frontend
+    - /var/lib/dpkg/lock
+  failed_when: false
+
+- name: Kill stuck apt/dpkg processes if any
+  ansible.builtin.shell: |
+    killall -9 apt-get apt dpkg 2>/dev/null || true
+  failed_when: false
+  changed_when: false
+
+- name: Reconfigure dpkg if needed
+  ansible.builtin.command: dpkg --configure -a
+  failed_when: false
+  changed_when: false
+
+- name: Clean apt cache to prevent corruption
+  ansible.builtin.command: apt-get clean
+  changed_when: false
+  failed_when: false
+
+- name: Update apt cache with retry logic
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  register: apt_update
+  until: apt_update is succeeded
+  retries: 5
+  delay: 10
+  ignore_errors: true
+
+# Fallback method if standard update fails
+- name: Fallback - Manual apt update
+  ansible.builtin.shell: |
+    apt-get update 2>&1
+  register: manual_update
+  when: apt_update is failed
+  changed_when: false
+  failed_when: 
+    - manual_update.rc != 0
+    - '"NO_PUBKEY" not in manual_update.stderr'
+    - '"GPG error" not in manual_update.stderr'
+
+- name: Ensure sudo package is present
+  ansible.builtin.apt:
+    name: sudo
+    state: present
+    update_cache: no  # Already updated above
+  register: sudo_install
+  until: sudo_install is succeeded
+  retries: 3
+  delay: 5
+
+- name: Create user with home directory and add to sudo group
+  ansible.builtin.user:
+    name: "{{ create_user_name }}"
+    uid: "{{ create_user_uid if create_user_uid is not none else omit }}"
+    shell: "{{ create_user_shell }}"
+    groups: "sudo"
+    append: true
+    create_home: true
+    state: present
+    password: >-
+      {{ (create_user_password_plain | length > 0)
+         | ternary( create_user_password_plain | password_hash('sha512'), omit) }}
+  register: user_created
+
+- name: Ensure .ssh directory exists
+  ansible.builtin.file:
+    path: "/home/{{ create_user_name }}/.ssh"
+    state: directory
+    owner: "{{ create_user_name }}"
+    group: "{{ create_user_name }}"
+    mode: "0700"
+
+- name: Install SSH public key for the user
+  ansible.builtin.authorized_key:
+    user: "{{ create_user_name }}"
+    state: present
+    key: "{{ create_user_ssh_pubkey }}"
+    manage_dir: false
+  when: create_user_ssh_pubkey | length > 0
+
+- name: Configure passwordless sudo via sudoers.d
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-{{ create_user_name }}"
+    owner: root
+    group: root
+    mode: "0440"
+    content: "{{ create_user_name }} ALL=(ALL) NOPASSWD:ALL"
+    validate: "visudo -cf %s"
+  when: sudo_nopasswd | bool
