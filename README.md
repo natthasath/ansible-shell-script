@@ -136,6 +136,12 @@ ansible-playbook playbooks/disk_report.yml -l dev
 ansible-playbook playbooks/check_egress_587.yml -l dev
 ```
 
+### 🏆 Check OS
+
+```shell
+ansible-playbook playbooks/check_os.yml -l dev
+```
+
 ### 🏆 Export Plugin Wordpress
 
 ```shell

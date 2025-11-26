@@ -1,0 +1,66 @@
+# playbooks/check_os.yml
+---
+- name: System information checker
+  hosts: servers
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: OS | Check distribution info (lsb_release)
+      ansible.builtin.command: lsb_release -a
+      changed_when: false
+      register: lsb_info
+      tags: [system, os, check]
+
+    - name: Kernel | Check kernel version (uname -r)
+      ansible.builtin.command: uname -r
+      changed_when: false
+      register: kernel_info
+      tags: [system, kernel, check]
+
+    - name: PHP | Check if PHP is installed
+      ansible.builtin.command: which php
+      changed_when: false
+      failed_when: false
+      register: php_exists
+      tags: [system, php, check]
+
+    - name: PHP | Check PHP version (if installed)
+      ansible.builtin.command: php -v
+      changed_when: false
+      register: php_info
+      when: php_exists.rc == 0
+      tags: [system, php, check]
+
+    - name: Fact | Store system information
+      ansible.builtin.set_fact:
+        system_info:
+          hostname: "{{ ansible_hostname }}"
+          os: "{{ ansible_distribution }}"
+          release: "{{ ansible_distribution_version }}"
+          kernel: "{{ kernel_info.stdout }}"
+          architecture: "{{ ansible_architecture }}"
+          memory: "{{ (ansible_memtotal_mb / 1024) | round(2) }} GB"
+          php: "{{ php_info.stdout_lines[0].split('(')[0].strip() if php_exists.rc == 0 else 'Not installed' }}"
+      tags: [system, fact]
+
+    - name: Display | Show combined system information table
+      ansible.builtin.debug:
+        msg: |
+          
+          ---- System Information Summary (All Hosts) ----
+          {{ "%-20s | %-15s | %-10s | %-20s | %-15s | %-12s | %-30s" | format("Hostname", "OS", "Release", "Kernel", "Architecture", "Memory", "PHP") }}
+          {% for host in ansible_play_hosts %}
+          {{ "%-20s | %-15s | %-10s | %-20s | %-15s | %-12s | %-30s" | format(
+              hostvars[host].system_info.hostname,
+              hostvars[host].system_info.os,
+              hostvars[host].system_info.release,
+              hostvars[host].system_info.kernel,
+              hostvars[host].system_info.architecture,
+              hostvars[host].system_info.memory,
+              hostvars[host].system_info.php
+          ) }}
+          {% endfor %}
+          
+      run_once: true
+      tags: [system, display]
